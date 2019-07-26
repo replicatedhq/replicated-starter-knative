@@ -1,0 +1,37 @@
+---
+# kind: replicated
+
+replicated_api_version: 2.29.0
+name: "Knative Starter"
+
+properties:
+  console_title: "Knative Starter PoC"
+  app_url: 'http://{{repl ConfigOption "hostname"}}:8008'
+
+host_requirements:
+  replicated_version: ">=2.37.0"
+
+kubernetes:
+  requirements:
+    total_cores: "1"
+    total_memory: 4GB
+
+config:
+- name: basic_config
+  title: Basics
+  description: Please enter the hostname or IP of this serrver.
+  items:
+  - name: hostname
+    title: Hostname
+    value: '{{repl ConsoleSetting "tls.hostname" }}'
+    type: text
+    required: true
+    test_proc:
+      display_name: Check DNS
+      command: resolve_host
+
+
+images: []
+
+---
+# kind: scheduler-kubernetes
