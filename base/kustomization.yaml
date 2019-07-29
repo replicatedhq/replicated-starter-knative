@@ -1,3 +1,0 @@
-namespace: '{{repl Namespace}}'
-resources:
-  - istio/istio.yaml
