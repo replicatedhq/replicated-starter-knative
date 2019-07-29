@@ -1,6 +1,4 @@
-namespace: '{{repl Namespace}}'
 resources:
   - knative_app.yaml
-  #- echo_deploy.yaml
-  #- echo_service.yaml
-  #- echo_ingress.yaml
+  - istio/istio.yaml
+  - istio/serving.yaml
