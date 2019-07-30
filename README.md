@@ -108,7 +108,7 @@ metadata:
   name: replicated-xxxxxxxxxxxxxxxxxxxx
 ```
 
-* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` and `knative-ingressgateway` services type are set to `NodePort`. If you would like to connect multiple nodes with a load balancer please change it to `LoadBalancer` for both in `base/patches.yaml`.
+* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` and `knative-ingressgateway` services type are set to `NodePort`. If you would like to connect multiple nodes with a load balancer please change it to `LoadBalancer` for both services under their respective `base/patch_*.yaml` file.
 
 Note: The files inside `base/istio/` are from upstream. To keep them up to date without forking we patch using Kustomize. When you add other components such as Build, Monitoring and Eventing, be sure to use the same patching strategy.
 
