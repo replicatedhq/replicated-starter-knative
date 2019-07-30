@@ -1,4 +1,4 @@
 resources:
-  - knative_app.yaml
+  - knative_serve.yaml
   - istio/istio.yaml
   - istio/serving.yaml
