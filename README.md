@@ -1,4 +1,4 @@
-Replicated Knative Starter
+Replicated Starter Knative
 ==================
 
 Example project showcasing how power users can combine several Replicated tools in order to manage
@@ -49,15 +49,9 @@ export REPLICATED_APP=...
 export REPLICATED_API_TOKEN=...
 ```
 
-You can ensure this is working with
-
-```
-make list-releases
-```
-
 #### Iterating on your release
 
-Once you've made changes to `replicated.yaml`, you can verify the final output before deploying. The generated file is located at `tmp/final.yaml`
+You can ensure this is working with the following. The generated file is located at `tmp/final.yaml`
 
 ```
 make kustomize
@@ -83,17 +77,35 @@ make lint
 
 ### Knative Example
 
-In this example we will only be deploying Knative's Serving component but other components such as Build, Monitoring and Eventing can be added later.
+In this example we will only be deploying Knative's Serving component but other components such as Build, Monitoring and Eventing can be added.
 
 A simple Go Function is shown in `base/knative_serve.yaml` that will deploy a simple Knative 'hello world' function. If you add more Knative services or components put them in separate files and list them under `resources` in `base/kustomization.yaml`
 
 ```
+---
+apiVersion: serving.knative.dev/v1alpha1 # Current version of Knative
+kind: Service
+metadata:
+  name: helloworld-go # The name of the app
+spec:
+  runLatest:
+    configuration:
+      revisionTemplate:
+        spec:
+          container:
+            image: gcr.io/knative-samples/helloworld-go # The URL to the image of the app
+            env:
+              - name: TARGET # The environment variable printed out by the sample app
+                value: "Go Sample v1"
 
 ``` 
+Sample: https://knative.dev/docs/serving/samples/hello-world/helloworld-go/
 
 ### Knative Caveats
 
-* Namespaces are not created automatically, use the following yaml file and `kubectl apply -f <file_name>` manually. Please note, when you add other components such as Build, Monitoring and Eventing add the appropriate namespaces.
+* Namespaces are not created automatically, use the following yaml file and `kubectl apply -f <file_name>` manually.
+
+Note: when you add other components such as Build, Monitoring and Eventing add the appropriate namespaces.
 
 ```
 ---
@@ -122,10 +134,7 @@ metadata:
   name: replicated-xxxxxxxxxxxxxxxxxxxx
 ```
 
-* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` service type is set to `NodePort`. If you are going to connect multiple nodes and have a load balancer then change it to `LoadBalancer`.
-
-- [replicated-lint](https://github.com/replicatedhq/replicated-lint)
-- [replicated vendor cli](https://github.com/replicatedhq/replicated)
+* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` service type is set to `NodePort`. If you would like to connect multiple nodes with a load balancer please change it to `LoadBalancer`.
 
 ### Integrating with CI
 
