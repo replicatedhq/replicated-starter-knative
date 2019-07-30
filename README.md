@@ -75,32 +75,6 @@ If you have nodejs installated, you can lint your YAML before releasing with
 make lint
 ```
 
-### Knative Example
-
-In this example we will only be deploying Knative's Serving component but other components such as Build, Monitoring and Eventing can be added.
-
-A simple Go Function is shown in `base/knative_serve.yaml` that will deploy a simple Knative 'hello world' function. If you add more Knative services or components put them in separate files and list them under `resources` in `base/kustomization.yaml`
-
-```
----
-apiVersion: serving.knative.dev/v1alpha1 # Current version of Knative
-kind: Service
-metadata:
-  name: helloworld-go # The name of the app
-spec:
-  runLatest:
-    configuration:
-      revisionTemplate:
-        spec:
-          container:
-            image: gcr.io/knative-samples/helloworld-go # The URL to the image of the app
-            env:
-              - name: TARGET # The environment variable printed out by the sample app
-                value: "Go Sample v1"
-
-``` 
-Sample: https://knative.dev/docs/serving/samples/hello-world/helloworld-go/
-
 ### Knative Caveats
 
 * Namespaces are not created automatically, use the following yaml file and `kubectl apply -f <file_name>` manually.
@@ -134,7 +108,83 @@ metadata:
   name: replicated-xxxxxxxxxxxxxxxxxxxx
 ```
 
-* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` service type is set to `NodePort`. If you would like to connect multiple nodes with a load balancer please change it to `LoadBalancer`.
+* By default only a single Master K8s cluster is launched, hence the `istio-ingressgateway` and `knative-ingressgateway` services type are set to `NodePort`. If you would like to connect multiple nodes with a load balancer please change it to `LoadBalancer` for both in `base/patches.yaml`.
+
+Note: The files inside `base/istio/` are from upstream. To keep them up to date without forking we patch using Kustomize. When you add other components such as Build, Monitoring and Eventing, be sure to use the same patching strategy.
+
+`base/patch_istio_istio.yaml`
+```
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-system
+spec:
+  type: NodePort <--- Change this to 'LoadBalancer'
+```
+
+### Knative Example
+
+In this example we will only be deploying Knative's Serving component but other components such as Build, Monitoring and Eventing can be added.
+
+A simple Go Function is shown in `base/knative_serve.yaml` that will deploy a simple Knative 'hello world' function. If you add more Knative services or components put them in separate files and list them under `resources` in `base/kustomization.yaml`
+
+```
+---
+apiVersion: serving.knative.dev/v1alpha1 # Current version of Knative
+kind: Service
+metadata:
+  name: helloworld-go # The name of the app
+spec:
+  runLatest:
+    configuration:
+      revisionTemplate:
+        spec:
+          container:
+            image: gcr.io/knative-samples/helloworld-go # The URL to the image of the app
+            env:
+              - name: TARGET # The environment variable printed out by the sample app
+                value: "Go Sample v1"
+
+``` 
+Sample: https://knative.dev/docs/serving/samples/hello-world/helloworld-go/
+
+Once you deploy the service using `make release`, you can access it by `curl`, but you need a few details first.
+
+`Cluster IP`
+```
+$ kubectl get svc --namespace istio-system istio-ingressgateway
+
+NAME                   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)
+                                                                   AGE
+istio-ingressgateway   NodePort   10.x.x.x   <none>        80:31380/TCP,443:31390/TCP,31400:31400/TCP,15011:28648/
+TCP,8060:20462/TCP,853:52772/TCP,15030:58166/TCP,15031:38377/TCP   6h17m
+```
+
+Replicated Namespace
+```
+$ kubectl get namespaces | cut -d' ' -f 1 | grep replicated-
+
+replicated-xxxxxxxxxxxxxxxxxxxx
+```
+
+`DOMAIN`
+```
+$ kubectl get ksvc helloworld-go  --output=custom-columns=NAME:.metadata.name,DOMAIN:.status.domain --namespace replicated-xxxxxxxxxxxxxxxxxxxx
+
+NAME            DOMAIN
+helloworld-go   helloworld-go.replicated-xxxxxxxxxxxxxxxxxxxx.example.com
+```
+
+Once you have the info run the following `curl`
+```
+$ curl -H "Host: helloworld-go.replicated-xxxxxxxxxxxxxxxxxxxx.example.com" http://10.x.x.x
+
+Hello Go Sample v1!
+```
+
+If you see the above output then you've successfully deployed a Knative Serve Function via Replicated.
 
 ### Integrating with CI
 

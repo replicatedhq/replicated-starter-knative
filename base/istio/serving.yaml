@@ -298,7 +298,7 @@ spec:
   selector:
     app: knative-ingressgateway
     knative: ingressgateway
-  type: NodePort
+  type: LoadBalancer
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment
