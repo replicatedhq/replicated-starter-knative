@@ -2,19 +2,19 @@
 # kind: replicated
 
 replicated_api_version: 2.29.0
-name: "Knative Starter"
+name: "Kubernetes Nginx Example"
 
 properties:
-  console_title: "Knative Starter PoC"
-  app_url: 'http://{{repl ConfigOption "hostname"}}:8008'
+  app_url: http://{{repl ConfigOption "hostname" }}
+  console_title: "Kubernetes Nginx Example"
 
 host_requirements:
-  replicated_version: ">=2.37.0"
+  replicated_version: ">=2.29.0"
 
 kubernetes:
   requirements:
-    total_cores: "1"
-    total_memory: 4GB
+    total_cores: "2"
+    total_memory: 8GB
 
 config:
 - name: basic_config
@@ -25,11 +25,21 @@ config:
     title: Hostname
     value: '{{repl ConsoleSetting "tls.hostname" }}'
     type: text
-    required: true
     test_proc:
       display_name: Check DNS
       command: resolve_host
-
+- name: server
+  title: Server Config
+  items:
+  - name: num_replicas
+    title: Number of instances to run
+    default: 1
+    type: text
+  - name: db_url
+    title: Database URL
+    type: text
+    required: true
+    default: postgres://pg.somebigbank.com/my_database?username=xxx&password=yyy
 
 images: []
 

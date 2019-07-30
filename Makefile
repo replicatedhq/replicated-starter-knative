@@ -25,6 +25,13 @@ lint: deps-lint
 	`npm bin`/replicated-lint validate -f replicated.yaml --reporter $(lint_reporter)
 
 
+.PHONY: kustomize
+kustomize: deps-vendor-cli
+	mkdir -p tmp
+	kustomize build base | awk '/^---/{print;print "# kind: scheduler-kubernetes";next}1' > tmp/k8s.yaml
+	cat replicated.yaml tmp/k8s.yaml > tmp/final.yaml
+
+
 .PHONY: release
 release: deps-vendor-cli
 	mkdir -p tmp
@@ -34,4 +41,3 @@ release: deps-vendor-cli
 		--promote $(CHANNEL) \
 	        --version $(VERSION_TAG) \
 	        --release-notes $(RELEASE_NOTES)
-

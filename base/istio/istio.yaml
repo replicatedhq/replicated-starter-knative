@@ -16,12 +16,12 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-galley
-    chart: galley-1.0.6
-    release: release-name
+    chart: galley-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: mixer
 data:
-  validatingwebhookconfiguration.yaml: |-
+  validatingwebhookconfiguration.yaml: |-    
     apiVersion: admissionregistration.k8s.io/v1beta1
     kind: ValidatingWebhookConfiguration
     metadata:
@@ -29,8 +29,8 @@ data:
       namespace: istio-system
       labels:
         app: istio-galley
-        chart: galley-1.0.6
-        release: release-name
+        chart: galley-1.0.1
+        release: RELEASE-NAME
         heritage: Tiller
     webhooks:
       - name: pilot.validation.istio.io
@@ -82,7 +82,8 @@ data:
             - destinationrules
             - envoyfilters
             - gateways
-            - serviceentries
+            # disabled per @costinm's request
+            # - serviceentries
             - virtualservices
         failurePolicy: Fail
       - name: mixer.validation.istio.io
@@ -141,8 +142,8 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-statsd-prom-bridge
-    chart: mixer-1.0.6
-    release: release-name
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: mixer
 data:
@@ -157,38 +158,24 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-security
-    chart: security-1.0.6
-    release: release-name
+    chart: security-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: security
 data:
   custom-resources.yaml: |-
-    # Authentication policy to enable permissive mode for all services (that have sidecar) in the mesh.
-    apiVersion: "authentication.istio.io/v1alpha1"
-    kind: "MeshPolicy"
-    metadata:
-      name: "default"
-      labels:
-        app: istio-security
-        chart: security-1.0.6
-        release: release-name
-        heritage: Tiller
-    spec:
-      peers:
-      - mtls:
-          mode: PERMISSIVE
-  run.sh: |-
+  run.sh: |-    
     #!/bin/sh
-
+    
     set -x
-
+    
     if [ "$#" -ne "1" ]; then
         echo "first argument should be path to custom resource yaml"
         exit 1
     fi
-
+    
     pathToResourceYAML=${1}
-
+    
     /kubectl get validatingwebhookconfiguration istio-galley 2>/dev/null
     if [ "$?" -eq 0 ]; then
         echo "istio-galley validatingwebhookconfiguration found - waiting for istio-galley deployment to be ready"
@@ -208,7 +195,7 @@ data:
     fi
     sleep 5
     /kubectl apply -f ${pathToResourceYAML}
-
+    
 
 ---
 # Source: istio/templates/configmap.yaml
@@ -220,8 +207,8 @@ metadata:
   namespace: istio-system
   labels:
     app: istio
-    chart: istio-1.0.6
-    release: release-name
+    chart: istio-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
 data:
   mesh: |-
@@ -232,13 +219,6 @@ data:
     # Set enableTracing to false to disable request tracing.
     enableTracing: true
 
-    # PATCH #3: Adding default connection timeout.
-    # Mesh-wide TCP connection timeout between Envoy sidecar and Application.
-    # If we do not specify the property - the value gets overwritten by mesh.connectTimeout's default (1s).
-    # This config could be removed once https://github.com/istio/istio/issues/11319 is resolved
-    connectTimeout: 10s
-    # PATCH #3 ends.
-
     # Set accessLogFile to empty string to disable access log.
     accessLogFile: "/dev/stdout"
     #
@@ -246,14 +226,10 @@ data:
     mixerCheckServer: istio-policy.istio-system.svc.cluster.local:9091
     mixerReportServer: istio-telemetry.istio-system.svc.cluster.local:9091
 
-    # policyCheckFailOpen allows traffic in cases when the mixer policy service cannot be reached.
-    # Default is false which means the traffic is denied when the client is unable to connect to Mixer.
-    policyCheckFailOpen: false
-
     # Unix Domain Socket through which envoy communicates with NodeAgent SDS to get
-    # key/cert for mTLS. Use secret-mount files instead of SDS if set to empty.
+    # key/cert for mTLS. Use secret-mount files instead of SDS if set to empty. 
     sdsUdsPath: ""
-
+    
     # How frequently should Envoy fetch key/cert from NodeAgent.
     sdsRefreshDelay: 15s
 
@@ -302,6 +278,9 @@ data:
       # Zipkin trace collector
       zipkinAddress: zipkin.istio-system:9411
       #
+      # Statsd metrics collector converts statsd metrics into Prometheus metrics.
+      statsdUdpAddress: istio-statsd-prom-bridge.istio-system:9125
+      #
       # Mutual TLS authentication between sidecars and istio control plane.
       controlPlaneAuthPolicy: NONE
       #
@@ -318,8 +297,8 @@ metadata:
   namespace: istio-system
   labels:
     app: istio
-    chart: istio-1.0.6
-    release: release-name
+    chart: istio-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: sidecar-injector
 data:
@@ -328,44 +307,57 @@ data:
     template: |-
       initContainers:
       - name: istio-init
-        image: "docker.io/istio/proxy_init:1.0.7"
+        image: "docker.io/istio/proxy_init:1.0.2"
         args:
         - "-p"
         - [[ .MeshConfig.ProxyListenPort ]]
         - "-u"
         - 1337
         - "-m"
-        - [[ annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode ]]
+        - [[ or (index .ObjectMeta.Annotations "sidecar.istio.io/interceptionMode") .ProxyConfig.InterceptionMode.String ]]
         - "-i"
-        - "[[ annotation .ObjectMeta `traffic.sidecar.istio.io/includeOutboundIPRanges`  "*"  ]]"
+        [[ if (isset .ObjectMeta.Annotations "traffic.sidecar.istio.io/includeOutboundIPRanges") -]]
+        - "[[ index .ObjectMeta.Annotations "traffic.sidecar.istio.io/includeOutboundIPRanges"  ]]"
+        [[ else -]]
+        - "*"
+        [[ end -]]
         - "-x"
-        - "[[ annotation .ObjectMeta `traffic.sidecar.istio.io/excludeOutboundIPRanges`  ""  ]]"
+        [[ if (isset .ObjectMeta.Annotations "traffic.sidecar.istio.io/excludeOutboundIPRanges") -]]
+        - "[[ index .ObjectMeta.Annotations "traffic.sidecar.istio.io/excludeOutboundIPRanges"  ]]"
+        [[ else -]]
+        - ""
+        [[ end -]]
         - "-b"
-        - "[[ annotation .ObjectMeta `traffic.sidecar.istio.io/includeInboundPorts` (includeInboundPorts .Spec.Containers) ]]"
+        [[ if (isset .ObjectMeta.Annotations "traffic.sidecar.istio.io/includeInboundPorts") -]]
+        - "[[ index .ObjectMeta.Annotations "traffic.sidecar.istio.io/includeInboundPorts"  ]]"
+        [[ else -]]
+        - [[ range .Spec.Containers -]][[ range .Ports -]][[ .ContainerPort -]], [[ end -]][[ end -]][[ end]]
         - "-d"
-        - "[[ excludeInboundPort (annotation .ObjectMeta `status.sidecar.istio.io/port`  0 ) (annotation .ObjectMeta `traffic.sidecar.istio.io/excludeInboundPorts`  "" ) ]]"
+        [[ if (isset .ObjectMeta.Annotations "traffic.sidecar.istio.io/excludeInboundPorts") -]]
+        - "[[ index .ObjectMeta.Annotations "traffic.sidecar.istio.io/excludeInboundPorts" ]]"
+        [[ else -]]
+        - ""
+        [[ end -]]
         imagePullPolicy: IfNotPresent
         securityContext:
           capabilities:
             add:
             - NET_ADMIN
-          privileged: true
-        restartPolicy: Always
+          restartPolicy: Always
+      
       containers:
       - name: istio-proxy
-        image: [[ annotation .ObjectMeta `sidecar.istio.io/proxyImage`  "docker.io/istio/proxyv2:1.0.7"  ]]
-        # PATCH #2: Graceful shutdown of the istio-proxy. See https://github.com/istio/istio/issues/7136.
+        # PATCH #2: Graceful shutdown of the istio-proxy.
         lifecycle:
           preStop:
             exec:
-              command: ["sh", "-c", 'sleep 20; while [ $(netstat -plunt | grep tcp | grep -v envoy | wc -l | xargs) -ne 0 ]; do sleep 1; done']
+              command: ["sh", "-c", 'sleep 20; until curl -s localhost:15000/clusters | grep "inbound|80|" | grep "rq_active" | grep "rq_active::0"; do sleep 1; done;']
         # PATCH #2 ends.
-
-        ports:
-        - containerPort: 15090
-          protocol: TCP
-          name: http-envoy-prom
-
+        image: [[ if (isset .ObjectMeta.Annotations "sidecar.istio.io/proxyImage") -]]
+        "[[ index .ObjectMeta.Annotations "sidecar.istio.io/proxyImage" ]]"
+        [[ else -]]
+        docker.io/istio/proxyv2:1.0.2
+        [[ end -]]
         args:
         - proxy
         - sidecar
@@ -384,13 +376,15 @@ data:
         - --parentShutdownDuration
         - [[ formatDuration .ProxyConfig.ParentShutdownDuration ]]
         - --discoveryAddress
-        - [[ annotation .ObjectMeta `sidecar.istio.io/discoveryAddress` .ProxyConfig.DiscoveryAddress ]]
+        - [[ .ProxyConfig.DiscoveryAddress ]]
         - --discoveryRefreshDelay
         - [[ formatDuration .ProxyConfig.DiscoveryRefreshDelay ]]
         - --zipkinAddress
         - [[ .ProxyConfig.ZipkinAddress ]]
         - --connectTimeout
         - [[ formatDuration .ProxyConfig.ConnectTimeout ]]
+        - --statsdUdpAddress
+        - [[ .ProxyConfig.StatsdUdpAddress ]]
         - --proxyAdminPort
         - [[ .ProxyConfig.ProxyAdminPort ]]
         [[ if gt .ProxyConfig.Concurrency 0 -]]
@@ -398,13 +392,7 @@ data:
         - [[ .ProxyConfig.Concurrency ]]
         [[ end -]]
         - --controlPlaneAuthPolicy
-        - [[ annotation .ObjectMeta `sidecar.istio.io/controlPlaneAuthPolicy` .ProxyConfig.ControlPlaneAuthPolicy ]]
-      [[- if (ne (annotation .ObjectMeta `status.sidecar.istio.io/port`  0 ) "0") ]]
-        - --statusPort
-        - [[ annotation .ObjectMeta `status.sidecar.istio.io/port`  0  ]]
-        - --applicationPorts
-        - "[[ annotation .ObjectMeta `readiness.status.sidecar.istio.io/applicationPorts` (applicationPorts .Spec.Containers) ]]"
-      [[- end ]]
+        - [[ or (index .ObjectMeta.Annotations "sidecar.istio.io/controlPlaneAuthPolicy") .ProxyConfig.ControlPlaneAuthPolicy ]]
         env:
         - name: POD_NAME
           valueFrom:
@@ -424,29 +412,10 @@ data:
               fieldPath: metadata.name
         - name: ISTIO_META_INTERCEPTION_MODE
           value: [[ or (index .ObjectMeta.Annotations "sidecar.istio.io/interceptionMode") .ProxyConfig.InterceptionMode.String ]]
-        [[ if .ObjectMeta.Annotations ]]
-        - name: ISTIO_METAJSON_ANNOTATIONS
-          value: |
-                 [[ toJson .ObjectMeta.Annotations ]]
-        [[ end ]]
-        [[ if .ObjectMeta.Labels ]]
-        - name: ISTIO_METAJSON_LABELS
-          value: |
-                 [[ toJson .ObjectMeta.Labels ]]
-        [[ end ]]
         imagePullPolicy: IfNotPresent
-        [[ if (ne (annotation .ObjectMeta `status.sidecar.istio.io/port`  0 ) "0") ]]
-        readinessProbe:
-          httpGet:
-            path: /healthz/ready
-            port: [[ annotation .ObjectMeta `status.sidecar.istio.io/port`  0  ]]
-          initialDelaySeconds: [[ annotation .ObjectMeta `readiness.status.sidecar.istio.io/initialDelaySeconds`  1  ]]
-          periodSeconds: [[ annotation .ObjectMeta `readiness.status.sidecar.istio.io/periodSeconds`  2  ]]
-          failureThreshold: [[ annotation .ObjectMeta `readiness.status.sidecar.istio.io/failureThreshold`  30  ]]
-        [[ end -]]securityContext:
-
+        securityContext:
           readOnlyRootFilesystem: true
-          [[ if eq (annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode) "TPROXY" -]]
+          [[ if eq (or (index .ObjectMeta.Annotations "sidecar.istio.io/interceptionMode") .ProxyConfig.InterceptionMode.String) "TPROXY" -]]
           capabilities:
             add:
             - NET_ADMIN
@@ -456,14 +425,14 @@ data:
           [[ end -]]
         restartPolicy: Always
         resources:
-          [[ if (isset .ObjectMeta.Annotations `sidecar.istio.io/proxyCPU`) -]]
+          [[ if (isset .ObjectMeta.Annotations "sidecar.istio.io/proxyCPU") -]]
           requests:
-            cpu: "[[ index .ObjectMeta.Annotations `sidecar.istio.io/proxyCPU` ]]"
-            memory: "[[ index .ObjectMeta.Annotations `sidecar.istio.io/proxyMemory` ]]"
+            cpu: "[[ index .ObjectMeta.Annotations "sidecar.istio.io/proxyCPU" ]]"
+            memory: "[[ index .ObjectMeta.Annotations "sidecar.istio.io/proxyMemory" ]]"
         [[ else -]]
           requests:
             cpu: 10m
-
+          
         [[ end -]]
         volumeMounts:
         - mountPath: /etc/istio/proxy
@@ -493,9 +462,9 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-galley
-    chart: galley-1.0.6
+    chart: galley-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 
 ---
 # Source: istio/charts/gateways/templates/serviceaccount.yaml
@@ -507,9 +476,9 @@ metadata:
   namespace: istio-system
   labels:
     app: egressgateway
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -518,9 +487,9 @@ metadata:
   namespace: istio-system
   labels:
     app: ingressgateway
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 ---
 
 ---
@@ -532,9 +501,9 @@ metadata:
   namespace: istio-system
   labels:
     app: mixer
-    chart: mixer-1.0.6
+    chart: mixer-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 
 ---
 # Source: istio/charts/pilot/templates/serviceaccount.yaml
@@ -545,9 +514,9 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-pilot
-    chart: pilot-1.0.6
+    chart: pilot-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 
 ---
 # Source: istio/charts/security/templates/cleanup-secrets.yaml
@@ -571,9 +540,9 @@ metadata:
     "helm.sh/hook-weight": "1"
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
@@ -585,9 +554,9 @@ metadata:
     "helm.sh/hook-weight": "1"
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
@@ -603,9 +572,9 @@ metadata:
     "helm.sh/hook-weight": "2"
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -626,8 +595,8 @@ metadata:
     "helm.sh/hook-weight": "3"
   labels:
     app: security
-    chart: security-1.0.6
-    release: release-name
+    chart: security-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
 spec:
   template:
@@ -635,7 +604,7 @@ spec:
       name: istio-cleanup-secrets
       labels:
         app: security
-        release: release-name
+        release: RELEASE-NAME
     spec:
       serviceAccountName: istio-cleanup-secrets-service-account
       containers:
@@ -653,96 +622,6 @@ spec:
       restartPolicy: OnFailure
 
 ---
-# Source: istio/charts/security/templates/create-custom-resources-job.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: istio-security-post-install-account
-  namespace: istio-system
-  labels:
-    app: istio-security
-    chart: security-1.0.6
-    heritage: Tiller
-    release: release-name
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRole
-metadata:
-  name: istio-security-post-install-istio-system
-  labels:
-    app: istio-security
-    chart: security-1.0.6
-    heritage: Tiller
-    release: release-name
-rules:
-- apiGroups: ["authentication.istio.io"] # needed to create default authn policy
-  resources: ["*"]
-  verbs: ["*"]
-- apiGroups: ["networking.istio.io"] # needed to create security destination rules
-  resources: ["*"]
-  verbs: ["*"]
-- apiGroups: ["admissionregistration.k8s.io"]
-  resources: ["validatingwebhookconfigurations"]
-  verbs: ["get"]
-- apiGroups: ["extensions"]
-  resources: ["deployments", "replicasets"]
-  verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1beta1
-kind: ClusterRoleBinding
-metadata:
-  name: istio-security-post-install-role-binding-istio-system
-  labels:
-    app: istio-security
-    chart: security-1.0.6
-    heritage: Tiller
-    release: release-name
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: istio-security-post-install-istio-system
-subjects:
-  - kind: ServiceAccount
-    name: istio-security-post-install-account
-    namespace: istio-system
----
-
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: istio-security-post-install
-  namespace: istio-system
-  annotations:
-    "helm.sh/hook": post-install
-    "helm.sh/hook-delete-policy": hook-succeeded
-  labels:
-    app: istio-security
-    chart: security-1.0.6
-    release: release-name
-    heritage: Tiller
-spec:
-  template:
-    metadata:
-      name: istio-security-post-install
-      labels:
-        app: istio-security
-        release: release-name
-    spec:
-      serviceAccountName: istio-security-post-install-account
-      containers:
-        - name: hyperkube
-          image: "quay.io/coreos/hyperkube:v1.7.6_coreos.0"
-          command: [ "/bin/bash", "/tmp/security/run.sh", "/tmp/security/custom-resources.yaml" ]
-          volumeMounts:
-            - mountPath: "/tmp/security"
-              name: tmp-configmap-security
-      volumes:
-        - name: tmp-configmap-security
-          configMap:
-            name: istio-security-custom-resources
-      restartPolicy: OnFailure
-
----
 # Source: istio/charts/security/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -751,9 +630,9 @@ metadata:
   namespace: istio-system
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 
 ---
 # Source: istio/charts/sidecarInjectorWebhook/templates/serviceaccount.yaml
@@ -764,13 +643,13 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-sidecar-injector
-    chart: sidecarInjectorWebhook-1.0.6
+    chart: sidecarInjectorWebhook-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 
 ---
 # Source: istio/templates/crds.yaml
-#
+# 
 # these CRDs only make sense when pilot is enabled
 #
 apiVersion: apiextensions.k8s.io/v1beta1
@@ -855,7 +734,7 @@ spec:
     - istio-io
     - networking-istio-io
   scope: Namespaced
-  version: v1alpha3
+  version: v1alpha3 
 ---
 apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
@@ -1847,8 +1726,7 @@ spec:
   version: v1alpha2
 ---
 #
-#
-
+# 
 ---
 # Source: istio/charts/galley/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -1857,9 +1735,9 @@ metadata:
   name: istio-galley-istio-system
   labels:
     app: istio-galley
-    chart: galley-1.0.6
+    chart: galley-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: ["admissionregistration.k8s.io"]
   resources: ["validatingwebhookconfigurations"]
@@ -1884,9 +1762,9 @@ kind: ClusterRole
 metadata:
   labels:
     app: gateways
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
   name: istio-egressgateway-istio-system
 rules:
 - apiGroups: ["extensions"]
@@ -1898,9 +1776,9 @@ kind: ClusterRole
 metadata:
   labels:
     app: gateways
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
   name: istio-ingressgateway-istio-system
 rules:
 - apiGroups: ["extensions"]
@@ -1916,9 +1794,9 @@ metadata:
   name: istio-mixer-istio-system
   labels:
     app: mixer
-    chart: mixer-1.0.6
+    chart: mixer-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: ["config.istio.io"] # istio CRD watcher
   resources: ["*"]
@@ -1930,7 +1808,7 @@ rules:
   resources: ["customresourcedefinitions"]
   verbs: ["get", "list", "watch"]
 - apiGroups: [""]
-  resources: ["configmaps", "endpoints", "pods", "services", "namespaces", "secrets", "replicationcontrollers"]
+  resources: ["configmaps", "endpoints", "pods", "services", "namespaces", "secrets"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["extensions"]
   resources: ["replicasets"]
@@ -1947,9 +1825,9 @@ metadata:
   name: istio-pilot-istio-system
   labels:
     app: istio-pilot
-    chart: pilot-1.0.6
+    chart: pilot-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: ["config.istio.io"]
   resources: ["*"]
@@ -1987,9 +1865,9 @@ metadata:
   name: istio-citadel-istio-system
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: [""]
   resources: ["secrets"]
@@ -2009,9 +1887,9 @@ metadata:
   name: istio-sidecar-injector-istio-system
   labels:
     app: istio-sidecar-injector
-    chart: sidecarInjectorWebhook-1.0.6
+    chart: sidecarInjectorWebhook-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 rules:
 - apiGroups: ["*"]
   resources: ["configmaps"]
@@ -2028,9 +1906,9 @@ metadata:
   name: istio-galley-admin-role-binding-istio-system
   labels:
     app: istio-galley
-    chart: galley-1.0.6
+    chart: galley-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -2078,9 +1956,9 @@ metadata:
   name: istio-mixer-admin-role-binding-istio-system
   labels:
     app: mixer
-    chart: mixer-1.0.6
+    chart: mixer-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -2098,9 +1976,9 @@ metadata:
   name: istio-pilot-istio-system
   labels:
     app: istio-pilot
-    chart: pilot-1.0.6
+    chart: pilot-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -2118,9 +1996,9 @@ metadata:
   name: istio-citadel-istio-system
   labels:
     app: security
-    chart: security-1.0.6
+    chart: security-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -2138,9 +2016,9 @@ metadata:
   name: istio-sidecar-injector-admin-role-binding-istio-system
   labels:
     app: istio-sidecar-injector
-    chart: sidecarInjectorWebhook-1.0.6
+    chart: sidecarInjectorWebhook-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -2178,8 +2056,8 @@ metadata:
   namespace: istio-system
   annotations:
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: istio-egressgateway
     istio: egressgateway
@@ -2203,8 +2081,8 @@ metadata:
   namespace: istio-system
   annotations:
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: istio-ingressgateway
     istio: ingressgateway
@@ -2216,13 +2094,16 @@ spec:
   ports:
     -
       name: http2
+      nodePort: 31380
       port: 80
       targetPort: 80
     -
       name: https
+      nodePort: 31390
       port: 443
     -
       name: tcp
+      nodePort: 31400
       port: 31400
     -
       name: tcp-pilot-grpc-tls
@@ -2255,8 +2136,8 @@ metadata:
   name: istio-policy
   namespace: istio-system
   labels:
-    chart: mixer-1.0.6
-    release: release-name
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
     istio: mixer
 spec:
   ports:
@@ -2276,8 +2157,8 @@ metadata:
   name: istio-telemetry
   namespace: istio-system
   labels:
-    chart: mixer-1.0.6
-    release: release-name
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
     istio: mixer
 spec:
   ports:
@@ -2295,6 +2176,71 @@ spec:
 ---
 
 ---
+# Source: istio/charts/mixer/templates/statsdtoprom.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: istio-statsd-prom-bridge
+  namespace: istio-system
+  labels:
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
+    istio: statsd-prom-bridge
+spec:
+  ports:
+  - name: statsd-prom
+    port: 9102
+  - name: statsd-udp
+    port: 9125
+    protocol: UDP
+  selector:
+    istio: statsd-prom-bridge
+
+---
+
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: istio-statsd-prom-bridge
+  namespace: istio-system
+  labels:
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
+    istio: mixer
+spec:
+  template:
+    metadata:
+      labels:
+        istio: statsd-prom-bridge
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: istio-mixer-service-account
+      volumes:
+      - name: config-volume
+        configMap:
+          name: istio-statsd-prom-bridge
+      containers:
+      - name: statsd-prom-bridge
+        image: "docker.io/prom/statsd-exporter:v0.6.0"
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9102
+        - containerPort: 9125
+          protocol: UDP
+        args:
+        - '-statsd.mapping-config=/etc/statsd/mapping.conf'
+        resources:
+          requests:
+            cpu: 10m
+          
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/statsd
+
+---
 # Source: istio/charts/pilot/templates/service.yaml
 apiVersion: v1
 kind: Service
@@ -2303,8 +2249,8 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-pilot
-    chart: pilot-1.0.6
-    release: release-name
+    chart: pilot-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
 spec:
   ports:
@@ -2365,8 +2311,8 @@ metadata:
   namespace: istio-system
   labels:
     app: galley
-    chart: galley-1.0.6
-    release: release-name
+    chart: galley-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: galley
 spec:
@@ -2386,7 +2332,7 @@ spec:
       serviceAccountName: istio-galley-service-account
       containers:
         - name: validator
-          image: "docker.io/istio/galley:1.0.7"
+          image: "docker.io/istio/galley:1.0.2"
           imagePullPolicy: IfNotPresent
           ports:
           - containerPort: 443
@@ -2430,7 +2376,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
       volumes:
       - name: certs
         secret:
@@ -2438,7 +2384,7 @@ spec:
       - name: config
         configMap:
           name: istio-galley-configuration
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -2481,8 +2427,8 @@ metadata:
   name: istio-egressgateway
   namespace: istio-system
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: istio-egressgateway
     istio: egressgateway
@@ -2500,16 +2446,11 @@ spec:
       serviceAccountName: istio-egressgateway-service-account
       containers:
         - name: istio-proxy
-          image: "docker.io/istio/proxyv2:1.0.7"
+          image: "docker.io/istio/proxyv2:1.0.2"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
             - containerPort: 443
-
-            - containerPort: 15090
-              protocol: TCP
-              name: http-envoy-prom
-
           args:
           - proxy
           - router
@@ -2527,6 +2468,8 @@ spec:
           - istio-egressgateway
           - --zipkinAddress
           - zipkin:9411
+          - --statsdUdpAddress
+          - istio-statsd-prom-bridge:9125
           - --proxyAdminPort
           - "15000"
           - --controlPlaneAuthPolicy
@@ -2536,7 +2479,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
           env:
           - name: POD_NAME
             valueFrom:
@@ -2580,7 +2523,7 @@ spec:
         secret:
           secretName: "istio-egressgateway-ca-certs"
           optional: true
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -2620,8 +2563,8 @@ metadata:
   name: istio-ingressgateway
   namespace: istio-system
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: istio-ingressgateway
     istio: ingressgateway
@@ -2639,7 +2582,7 @@ spec:
       serviceAccountName: istio-ingressgateway-service-account
       containers:
         - name: istio-proxy
-          image: "docker.io/istio/proxyv2:1.0.7"
+          image: "docker.io/istio/proxyv2:1.0.2"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -2650,11 +2593,6 @@ spec:
             - containerPort: 853
             - containerPort: 15030
             - containerPort: 15031
-
-            - containerPort: 15090
-              protocol: TCP
-              name: http-envoy-prom
-
           args:
           - proxy
           - router
@@ -2672,6 +2610,8 @@ spec:
           - istio-ingressgateway
           - --zipkinAddress
           - zipkin:9411
+          - --statsdUdpAddress
+          - istio-statsd-prom-bridge:9125
           - --proxyAdminPort
           - "15000"
           - --controlPlaneAuthPolicy
@@ -2681,7 +2621,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
           env:
           - name: POD_NAME
             valueFrom:
@@ -2725,7 +2665,7 @@ spec:
         secret:
           secretName: "istio-ingressgateway-ca-certs"
           optional: true
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -2759,6 +2699,8 @@ spec:
                 values:
                 - s390x
 ---
+
+---
 # Source: istio/charts/mixer/templates/deployment.yaml
 
 apiVersion: extensions/v1beta1
@@ -2767,8 +2709,8 @@ metadata:
   name: istio-policy
   namespace: istio-system
   labels:
-    chart: mixer-1.0.6
-    release: release-name
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
     istio: mixer
 spec:
   replicas: 1
@@ -2790,7 +2732,7 @@ spec:
           optional: true
       - name: uds-socket
         emptyDir: {}
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -2825,7 +2767,7 @@ spec:
                 - s390x
       containers:
       - name: mixer
-        image: "docker.io/istio/mixer:1.0.7"
+        image: "docker.io/istio/mixer:1.0.2"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9093
@@ -2836,14 +2778,10 @@ spec:
           - --configStoreURL=k8s://
           - --configDefaultNamespace=istio-system
           - --trace_zipkin_url=http://zipkin:9411/api/v1/spans
-          - --numCheckCacheEntries=0
-        env:
-        - name: GODEBUG
-          value: "gctrace=2"
         resources:
           requests:
             cpu: 10m
-
+          
         volumeMounts:
         - name: uds-socket
           mountPath: /sock
@@ -2854,17 +2792,11 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
       - name: istio-proxy
-        image: "docker.io/istio/proxyv2:1.0.7"
+        image: "docker.io/istio/proxyv2:1.0.2"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9091
         - containerPort: 15004
-
-        ports:
-        - containerPort: 15090
-          protocol: TCP
-          name: http-envoy-prom
-
         args:
         - proxy
         - --serviceCluster
@@ -2892,7 +2824,7 @@ spec:
         resources:
           requests:
             cpu: 10m
-
+          
         volumeMounts:
         - name: istio-certs
           mountPath: /etc/certs
@@ -2907,8 +2839,8 @@ metadata:
   name: istio-telemetry
   namespace: istio-system
   labels:
-    chart: mixer-1.0.6
-    release: release-name
+    chart: mixer-1.0.1
+    release: RELEASE-NAME
     istio: mixer
 spec:
   replicas: 1
@@ -2932,7 +2864,7 @@ spec:
         emptyDir: {}
       containers:
       - name: mixer
-        image: "docker.io/istio/mixer:1.0.7"
+        image: "docker.io/istio/mixer:1.0.2"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9093
@@ -2943,13 +2875,10 @@ spec:
           - --configStoreURL=k8s://
           - --configDefaultNamespace=istio-system
           - --trace_zipkin_url=http://zipkin:9411/api/v1/spans
-        env:
-        - name: GODEBUG
-          value: "gctrace=2"
         resources:
           requests:
             cpu: 10m
-
+          
         volumeMounts:
         - name: uds-socket
           mountPath: /sock
@@ -2960,17 +2889,11 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
       - name: istio-proxy
-        image: "docker.io/istio/proxyv2:1.0.7"
+        image: "docker.io/istio/proxyv2:1.0.2"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9091
         - containerPort: 15004
-
-        ports:
-        - containerPort: 15090
-          protocol: TCP
-          name: http-envoy-prom
-
         args:
         - proxy
         - --serviceCluster
@@ -2998,7 +2921,7 @@ spec:
         resources:
           requests:
             cpu: 10m
-
+          
         volumeMounts:
         - name: istio-certs
           mountPath: /etc/certs
@@ -3006,7 +2929,7 @@ spec:
         - name: uds-socket
           mountPath: /sock
 
----
+--- 
 
 ---
 # Source: istio/charts/pilot/templates/deployment.yaml
@@ -3018,8 +2941,8 @@ metadata:
   # TODO: default template doesn't have this, which one is right ?
   labels:
     app: istio-pilot
-    chart: pilot-1.0.6
-    release: release-name
+    chart: pilot-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: pilot
   annotations:
@@ -3038,7 +2961,7 @@ spec:
       serviceAccountName: istio-pilot-service-account
       containers:
         - name: discovery
-          image: "docker.io/istio/pilot:1.0.7"
+          image: "docker.io/istio/pilot:1.0.2"
           imagePullPolicy: IfNotPresent
           args:
           - "discovery"
@@ -3075,7 +2998,7 @@ spec:
             requests:
               cpu: 500m
               memory: 2048Mi
-
+            
           volumeMounts:
           - name: config-volume
             mountPath: /etc/istio/config
@@ -3083,7 +3006,7 @@ spec:
             mountPath: /etc/certs
             readOnly: true
         - name: istio-proxy
-          image: "docker.io/istio/proxyv2:1.0.7"
+          image: "docker.io/istio/proxyv2:1.0.2"
           imagePullPolicy: IfNotPresent
           ports:
           - containerPort: 15003
@@ -3117,7 +3040,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
           volumeMounts:
           - name: istio-certs
             mountPath: /etc/certs
@@ -3129,8 +3052,8 @@ spec:
       - name: istio-certs
         secret:
           secretName: istio.istio-pilot-service-account
-          optional: true
-      affinity:
+          optional: true   
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -3174,8 +3097,8 @@ metadata:
   namespace: istio-system
   labels:
     app: security
-    chart: security-1.0.6
-    release: release-name
+    chart: security-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: citadel
 spec:
@@ -3191,7 +3114,7 @@ spec:
       serviceAccountName: istio-citadel-service-account
       containers:
         - name: citadel
-          image: "docker.io/istio/citadel:1.0.7"
+          image: "docker.io/istio/citadel:1.0.2"
           imagePullPolicy: IfNotPresent
           args:
             - --append-dns-names=true
@@ -3203,8 +3126,8 @@ spec:
           resources:
             requests:
               cpu: 10m
-
-      affinity:
+            
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -3247,8 +3170,8 @@ metadata:
   namespace: istio-system
   labels:
     app: sidecarInjectorWebhook
-    chart: sidecarInjectorWebhook-1.0.6
-    release: release-name
+    chart: sidecarInjectorWebhook-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     istio: sidecar-injector
 spec:
@@ -3264,7 +3187,7 @@ spec:
       serviceAccountName: istio-sidecar-injector-service-account
       containers:
         - name: sidecar-injector-webhook
-          image: "docker.io/istio/sidecar_injector:1.0.7"
+          image: "docker.io/istio/sidecar_injector:1.0.2"
           imagePullPolicy: IfNotPresent
           args:
             - --caCertFile=/etc/istio/certs/root-cert.pem
@@ -3305,7 +3228,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
       volumes:
       - name: config-volume
         configMap:
@@ -3319,7 +3242,7 @@ spec:
           items:
           - key: config
             path: config
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -3400,7 +3323,7 @@ metadata:
     name: istio-ingressgateway
     namespace: istio-system
 spec:
-    maxReplicas: 1
+    maxReplicas: 5
     minReplicas: 1
     scaleTargetRef:
       apiVersion: apps/v1beta1
@@ -3484,8 +3407,8 @@ metadata:
   namespace: istio-system
   labels:
     app: istio-sidecar-injector
-    chart: sidecarInjectorWebhook-1.0.6
-    release: release-name
+    chart: sidecarInjectorWebhook-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
 webhooks:
   - name: sidecar-injector.istio.io
@@ -3518,11 +3441,11 @@ webhooks:
 
 
 ---
-# Source: istio/charts/security/templates/enable-mesh-mtls.yaml
+# Source: istio/charts/security/templates/create-custom-resources-job.yaml
 
 
 ---
-# Source: istio/charts/security/templates/enable-mesh-permissive.yaml
+# Source: istio/charts/security/templates/enable-mesh-mtls.yaml
 
 
 ---
@@ -4278,9 +4201,9 @@ metadata:
   namespace: istio-system
   labels:
     app: cluster-local-gateway
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
 ---
 
 ---
@@ -4291,9 +4214,9 @@ kind: ClusterRole
 metadata:
   labels:
     app: gateways
-    chart: gateways-1.0.6
+    chart: gateways-1.0.1
     heritage: Tiller
-    release: release-name
+    release: RELEASE-NAME
   name: cluster-local-gateway-istio-system
 rules:
 - apiGroups: ["extensions"]
@@ -4328,8 +4251,8 @@ metadata:
   namespace: istio-system
   annotations:
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: cluster-local-gateway
     istio: cluster-local-gateway
@@ -4376,8 +4299,8 @@ metadata:
   name: cluster-local-gateway
   namespace: istio-system
   labels:
-    chart: gateways-1.0.6
-    release: release-name
+    chart: gateways-1.0.1
+    release: RELEASE-NAME
     heritage: Tiller
     app: cluster-local-gateway
     istio: cluster-local-gateway
@@ -4395,7 +4318,7 @@ spec:
       serviceAccountName: cluster-local-gateway-service-account
       containers:
         - name: istio-proxy
-          image: "docker.io/istio/proxyv2:1.0.7"
+          image: "docker.io/istio/proxyv2:1.0.2"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
@@ -4405,11 +4328,6 @@ spec:
             - containerPort: 8060
             - containerPort: 15030
             - containerPort: 15031
-
-            - containerPort: 15090
-              protocol: TCP
-              name: http-envoy-prom
-
           args:
           - proxy
           - router
@@ -4427,6 +4345,8 @@ spec:
           - cluster-local-gateway
           - --zipkinAddress
           - zipkin.istio-system:9411
+          - --statsdUdpAddress
+          - istio-statsd-prom-bridge.istio-system:9125
           - --proxyAdminPort
           - "15000"
           - --controlPlaneAuthPolicy
@@ -4436,7 +4356,7 @@ spec:
           resources:
             requests:
               cpu: 10m
-
+            
           env:
           - name: POD_NAME
             valueFrom:
@@ -4480,7 +4400,7 @@ spec:
         secret:
           secretName: "istio-clusterlocalgateway-ca-certs"
           optional: true
-      affinity:
+      affinity:      
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
@@ -4524,7 +4444,7 @@ metadata:
     name: cluster-local-gateway
     namespace: istio-system
 spec:
-    maxReplicas: 1
+    maxReplicas: 5
     minReplicas: 1
     scaleTargetRef:
       apiVersion: apps/v1beta1
@@ -4535,3 +4455,32 @@ spec:
       resource:
         name: cpu
         targetAverageUtilization: 60
+---
+
+---
+# Source: istio/charts/telemetry-gateway/templates/gateway.yaml
+
+
+---
+# Source: istio/templates/configmap.yaml
+
+
+---
+# Source: istio/templates/crds.yaml
+# 
+# these CRDs only make sense when pilot is enabled
+#
+
+# these CRDs only make sense when security is enabled
+#
+
+#
+# 
+---
+# Source: istio/templates/install-custom-resources.sh.tpl
+
+
+---
+# Source: istio/templates/sidecar-injector-configmap.yaml
+
+

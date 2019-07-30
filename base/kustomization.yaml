@@ -1,3 +1,7 @@
-namespace: '{{repl Namespace}}'
 resources:
+  - knative_serve.yaml
   - istio/istio.yaml
+  - istio/serving.yaml
+patchesStrategicMerge:
+  - patch_istio_istio.yaml
+  - patch_istio_serving.yaml
