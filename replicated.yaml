@@ -16,6 +16,31 @@ kubernetes:
     total_cores: "2"
     total_memory: 8GB
 
+custom_requirements:
+- id: k8s-namespace-exists-istio-system
+  message: 'Check istio-system k8s namespace existence'
+  description: 'isito-system namespace is needed for Knative components.'
+  results:
+  - status: success
+    message:
+      id: File /etc/debian_version exists.
+      default_message: File /etc/debian_version exists.
+    condition:
+      status_code: 0
+  - status: error
+    message:
+      id: File /etc/debian_version does not exists.
+      default_message: File /etc/debian_version does not exists.
+    condition:
+      status_code: 1
+  command:
+    id: scheduler
+    timeout: 15
+    data:
+      kubernetes:
+        pod_name: "k8s-namespace-exists-istio-system"
+        global: true
+
 config:
 - name: basic_config
   title: Basics
@@ -44,4 +69,26 @@ config:
 images: []
 
 ---
+# kind: preflight-kubernetes
+apiVersion: v1
+kind: Pod
+metadata:
+  name: k8s-namespace-exists-istio-system
+spec:
+  containers:
+  - name: tester
+    image: busybox
+    command: ["test", "-e", "/host/etc/debian_version"]
+    ports:
+    - containerPort: 80
+    volumeMounts:
+    - name: etc
+      mountPath: /host/etc
+  volumes:
+  - name: etc
+    hostPath:
+      path: /etc
+
+---
+
 # kind: scheduler-kubernetes
